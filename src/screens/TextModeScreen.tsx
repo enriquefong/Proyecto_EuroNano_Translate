@@ -53,8 +53,9 @@ export function TextModeScreen() {
     if (srcLang.code !== dstLang.code) {
       const newRoute = engine.getRoute(srcLang.code, dstLang.code);
       setRoute(newRoute);
+      engine.preloadModels(srcLang.code, dstLang.code);
     }
-  }, [srcLang.code, dstLang.code]);
+  }, [srcLang.code, dstLang.code, engine]);
 
   // Debounced translation
   const handleTextChange = useCallback((text: string) => {

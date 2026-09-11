@@ -9,7 +9,7 @@
  * - Confidence indicator
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -45,6 +45,12 @@ export function VoiceModeScreen() {
 
   const micScaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (srcLang.code !== dstLang.code) {
+      engine.preloadModels(srcLang.code, dstLang.code);
+    }
+  }, [srcLang.code, dstLang.code, engine]);
 
   // Microphone press handlers
   const handleMicPressIn = useCallback(() => {

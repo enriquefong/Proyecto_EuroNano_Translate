@@ -10,7 +10,7 @@
  * - Pause/edit button before TTS playback
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -51,6 +51,12 @@ export function ConversationModeScreen() {
   const scrollRefB = useRef<ScrollView>(null);
   const micScaleA = useRef(new Animated.Value(1)).current;
   const micScaleB = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (langA.code !== langB.code) {
+      engine.preloadModels(langA.code, langB.code);
+    }
+  }, [langA.code, langB.code, engine]);
 
   const handleStartConversation = useCallback(() => {
     setIsStarted(true);
