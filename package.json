@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "babel-preset-expo": "^57.0.11",
     "bare-pack": "^1.5.1",
     "typescript": "~6.0.3"
   },
