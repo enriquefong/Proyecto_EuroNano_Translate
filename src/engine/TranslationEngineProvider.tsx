@@ -1,9 +1,8 @@
 /**
- * EuroNano Translate — Translation Engine Provider
- *
- * React Context + Zustand store that manages the full lifecycle of
- * QVAC models (NMT, ASR, TTS) and exposes translation, transcription,
- * and synthesis functions to the UI.
+ * EuroNano Translate - Translation Engine Provider
+ * 
+ * Refactored to use Sequential Load/Unload Discipline (one model resident at a time)
+ * and pre-download weights to storage before loading into RAM.
  */
 
 import React, { createContext, useContext, useEffect, useRef, useCallback } from 'react';
@@ -32,49 +31,36 @@ import {
   type PerfLogEntry,
 } from './perf-logger';
 
-// ─── Store Types ────────────────────────────────────────────────────────────
-
-interface LoadedModel {
-  modelId: string;
-  pairKey: string;
-  loadedAt: number;
-}
+// --- Store Types ---
 
 interface TranslationResult {
   translatedText: string;
   route: TranslationRoute;
-  intermediateText?: string; // For pivot: the English intermediate
+  intermediateText?: string; 
   totalMs: number;
 }
 
 interface EngineState {
-  // Model management
-  loadedNmtModels: Map<string, LoadedModel>;
-  whisperModelId: string | null;
-  ttsModelId: string | null;
   currentVariant: ModelVariant;
   isLoading: boolean;
   loadingMessage: string;
   downloadProgress: number;
   error: string | null;
 
-  // Settings
   autoPlayTts: boolean;
   showPivotIndicator: boolean;
+  
+  // Single active model tracker
+  currentModelId: string | null;
+  currentModelType: string | null;
 
-  // Actions
   setVariant: (variant: ModelVariant) => void;
   setLoading: (loading: boolean, message?: string) => void;
   setProgress: (progress: number) => void;
   setError: (error: string | null) => void;
   setAutoPlayTts: (enabled: boolean) => void;
-  cacheNmtModel: (pairKey: string, modelId: string) => void;
-  removeCachedModel: (pairKey: string) => void;
-  clearAllModels: () => void;
-  setWhisperModelId: (id: string | null) => void;
-  setTtsModelId: (id: string | null) => void;
+  setCurrentModel: (id: string | null, type: string | null) => void;
 }
-
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
@@ -86,7 +72,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   if (typeof btoa !== 'undefined') {
     return btoa(binary);
   }
-  
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let base64 = '';
   for (let i = 0; i < len; i += 3) {
@@ -125,9 +110,6 @@ function writeWavHeader(view: DataView, sampleRate: number, numChannels: number,
 }
 
 export const useEngineStore = create<EngineState>((set) => ({
-  loadedNmtModels: new Map(),
-  whisperModelId: null,
-  ttsModelId: null,
   currentVariant: 'Tiny',
   isLoading: false,
   loadingMessage: '',
@@ -136,244 +118,155 @@ export const useEngineStore = create<EngineState>((set) => ({
   autoPlayTts: true,
   showPivotIndicator: true,
 
+  currentModelId: null,
+  currentModelType: null,
+
   setVariant: (variant) => set({ currentVariant: variant }),
   setLoading: (loading, message = '') => set({ isLoading: loading, loadingMessage: message }),
   setProgress: (progress) => set({ downloadProgress: progress }),
   setError: (error) => set({ error }),
   setAutoPlayTts: (enabled) => set({ autoPlayTts: enabled }),
-  cacheNmtModel: (pairKey, modelId) =>
-    set((state) => {
-      const newMap = new Map(state.loadedNmtModels);
-      newMap.set(pairKey, { modelId, pairKey, loadedAt: Date.now() });
-      return { loadedNmtModels: newMap };
-    }),
-  removeCachedModel: (pairKey) =>
-    set((state) => {
-      const newMap = new Map(state.loadedNmtModels);
-      newMap.delete(pairKey);
-      return { loadedNmtModels: newMap };
-    }),
-  clearAllModels: () =>
-    set({
-      loadedNmtModels: new Map(),
-      whisperModelId: null,
-      ttsModelId: null,
-    }),
-  setWhisperModelId: (id) => set({ whisperModelId: id }),
-  setTtsModelId: (id) => set({ ttsModelId: id }),
+  setCurrentModel: (id, type) => set({ currentModelId: id, currentModelType: type }),
 }));
 
-// ─── Engine Context ─────────────────────────────────────────────────────────
-
 interface EngineContextValue {
-  /**
-   * Translates text between two languages, handling pivot routing automatically.
-   */
-  translateText: (
-    text: string,
-    srcLang: string,
-    dstLang: string,
-    onStream?: (partial: string) => void,
-  ) => Promise<TranslationResult>;
-
-  /**
-   * Transcribes audio to text using Whisper ASR.
-   */
-  transcribeAudio: (audioUri: string) => Promise<{
-    text: string;
-    language: string;
-    confidence: number;
-  }>;
-
-  /**
-   * Synthesizes speech from text using Supertonic TTS.
-   * Returns the audio buffer for playback.
-   */
-  synthesizeSpeech: (text: string, language: string) => Promise<{
-    uri: string;
-    sampleRate: number;
-  }>;
-
-  /**
-   * Preloads models needed for a specific language pair.
-   */
+  translateText: (text: string, srcLang: string, dstLang: string, onStream?: (text: string) => void) => Promise<TranslationResult>;
+  transcribeAudio: (audioUri: string) => Promise<{text: string; language: string; confidence: number}>;
+  synthesizeSpeech: (text: string, language: string) => Promise<{uri: string; sampleRate: number}>;
   preloadModels: (srcLang: string, dstLang: string) => Promise<void>;
-
-  /**
-   * Unloads all models to free memory.
-   */
   unloadAllModels: () => Promise<void>;
-
-  /**
-   * Gets the translation route for a language pair (for UI display).
-   */
   getRoute: (srcLang: string, dstLang: string) => TranslationRoute;
-
-  /**
-   * Whether the engine is ready (SDK loaded).
-   */
   isReady: boolean;
 }
 
 const EngineContext = createContext<EngineContextValue | null>(null);
 
-export function useEngine(): EngineContextValue {
-  const ctx = useContext(EngineContext);
-  if (!ctx) {
-    throw new Error('useEngine must be used within a TranslationEngineProvider');
-  }
-  return ctx;
+export function useEngine() {
+  const context = useContext(EngineContext);
+  if (!context) throw new Error('useEngine must be used within TranslationEngineProvider');
+  return context;
 }
 
-// ─── Provider Component ─────────────────────────────────────────────────────
-
-interface ProviderProps {
-  children: React.ReactNode;
-}
-
-/**
- * TranslationEngineProvider
- *
- * Wraps the app in a context that manages the QVAC SDK lifecycle.
- * Handles model loading/unloading, translation with pivot routing,
- * ASR, and TTS. Manages background/foreground transitions to free
- * RAM on resource-constrained devices.
- */
-export function TranslationEngineProvider({ children }: ProviderProps) {
-  const isReadyRef = useRef(false);
+export function TranslationEngineProvider({ children }: { children: React.ReactNode }) {
   const qvacRef = useRef<any>(null);
+  const isReadyRef = useRef(false);
+  const pendingLoadRef = useRef<{key: string, promise: Promise<string>} | null>(null);
 
-  // Handle app state changes (background/foreground)
   useEffect(() => {
-    const handleAppStateChange = (nextState: AppStateStatus) => {
-      if (nextState === 'background') {
-        // Unload models when app goes to background for extended period
-        // This is critical for devices with 4GB RAM (§4.2)
-        console.log('[Engine] App going to background, scheduling model unload...');
-      } else if (nextState === 'active') {
-        console.log('[Engine] App returning to foreground');
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, []);
-
-  // Initialize QVAC SDK
-  useEffect(() => {
-    const initSDK = async () => {
+    async function initSDK() {
       try {
         useEngineStore.getState().setLoading(true, 'Inicializando motor de IA...');
-
-        // Dynamic import of @qvac/sdk
-        const qvac = await import('@qvac/sdk');
-        qvacRef.current = qvac;
-
+        const sdk = await import('@qvac/sdk');
+        qvacRef.current = sdk;
         isReadyRef.current = true;
-        useEngineStore.getState().setLoading(false);
-        console.log('[Engine] QVAC SDK initialized successfully');
+        console.log('[Engine] QVAC SDK initialized');
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Error al inicializar el motor de IA';
+        console.error('[Engine] Failed to initialize SDK', err);
+        const message = err instanceof Error ? err.message : 'Error al iniciar SDK';
         useEngineStore.getState().setError(message);
+      } finally {
         useEngineStore.getState().setLoading(false);
-        console.error('[Engine] SDK init error:', err);
       }
-    };
-
+    }
     initSDK();
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState.match(/inactive|background/)) {
+        console.log('[Engine] App went background, maintaining state');
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
-  // ─── Translation ────────────────────────────────────────────────────────
+  // --- Exclusive Load Logic ---
 
-  const translateText = useCallback(async (
-    text: string,
-    srcLang: string,
-    dstLang: string,
-    onStream?: (partial: string) => void,
-  ): Promise<TranslationResult> => {
-    const startTime = Date.now();
-    const route = getTranslationRoute(srcLang, dstLang);
+  const loadExclusive = useCallback(async (modelSrc: any, modelType: string, modelConfig?: any): Promise<string> => {
     const store = useEngineStore.getState();
-    let intermediateText: string | undefined;
+    const key = `${modelType}:${JSON.stringify(modelSrc)}`;
 
+    if (store.currentModelId && store.currentModelType === key) return store.currentModelId;
+    if (pendingLoadRef.current && pendingLoadRef.current.key === key) return pendingLoadRef.current.promise;
+
+    if (store.currentModelId && store.currentModelType !== key) {
+      console.log(`[Engine] Unloading previous model: ${store.currentModelType}`);
+      await qvacRef.current.unloadModel({ modelId: store.currentModelId }).catch(() => {});
+      store.setCurrentModel(null, null);
+    }
+
+    console.log(`[Engine] Loading model: ${key}`);
+    const promise = qvacRef.current.loadModel({
+      modelSrc,
+      modelType,
+      modelConfig,
+      onProgress: (p: any) => store.setProgress(p.percentage),
+    }).then((modelId: string) => {
+      store.setCurrentModel(modelId, key);
+      return modelId;
+    });
+
+    pendingLoadRef.current = { key, promise };
     try {
-      store.setLoading(true, `Traduciendo ${route.routeLabel}...`);
-      let currentText = text;
+      return await promise;
+    } finally {
+      if (pendingLoadRef.current?.promise === promise) {
+        pendingLoadRef.current = null;
+      }
+    }
+  }, []);
+
+  // --- Core Methods ---
+
+  const translateText = useCallback(async (text: string, srcLangCode: string, dstLangCode: string, onStream?: (text: string) => void) => {
+    const store = useEngineStore.getState();
+    const route = getTranslationRoute(srcLangCode, dstLangCode);
+    const srcLang = LANGUAGE_MAP[srcLangCode];
+    const dstLang = LANGUAGE_MAP[dstLangCode];
+
+    const startTime = Date.now();
+    try {
+      store.setLoading(true, 'Traduciendo...');
+      store.setError(null);
 
       if (!qvacRef.current) throw new Error('SDK no inicializado');
 
-      const qvac = qvacRef.current;
+      let currentText = text;
+      let intermediateText: string | undefined;
 
-      if (!route.requiresPivot) {
-        // Direct translation
-        const targetTag = route.steps[0].targetTag;
-        const textToTranslate = targetTag ? `${targetTag} ${text}` : text;
-        const pairKey = route.steps[0].modelPairKey;
-        const loadedModel = store.loadedNmtModels.get(pairKey);
-        if (!loadedModel) throw new Error('Model not loaded');
+      for (let i = 0; i < route.steps.length; i++) {
+        const step = route.steps[i];
+        const config = getModelConfig(step.from, step.to);
+        const actualModelSrc = qvacRef.current[config.modelSrc];
+
+        const modelId = await loadExclusive(actualModelSrc, config.modelType, { from: step.from, to: step.to });
+
+        const textToTranslate = prependTargetTag(currentText, step.to);
         
-        const result = qvac.translate({
-           modelId: loadedModel.modelId,
-           text: textToTranslate,
-           stream: !!onStream
-        });
+        const tx = qvacRef.current.translate({ modelId, text: textToTranslate, stream: !!onStream });
         
-        if (onStream) {
+        if (onStream && i === route.steps.length - 1) {
            let full = '';
-           for await (const token of result.tokenStream) {
+           for await (const token of tx.tokenStream) {
               full += token;
               onStream(full);
            }
            currentText = full;
         } else {
-           currentText = await result.text;
-        }
-        intermediateText = undefined;
-      } else {
-        // Pivot translation
-        const pairKey1 = route.steps[0].modelPairKey;
-        const loadedModel1 = store.loadedNmtModels.get(pairKey1);
-        if (!loadedModel1) throw new Error('Model not loaded');
-        
-        const step1 = qvac.translate({ modelId: loadedModel1.modelId, text, stream: !!onStream });
-        if (onStream) {
-           let full = '';
-           for await (const token of step1.tokenStream) {
-              full += token;
-              onStream(full);
+           currentText = await tx.text;
+           if (i === 0 && route.requiresPivot) {
+             intermediateText = currentText;
            }
-           intermediateText = full;
-        } else {
-           intermediateText = await step1.text;
-        }
-
-        const targetTag = route.steps[1].targetTag;
-        const textToTranslate = targetTag ? `${targetTag} ${intermediateText}` : intermediateText;
-        const pairKey2 = route.steps[1].modelPairKey;
-        const loadedModel2 = store.loadedNmtModels.get(pairKey2);
-        if (!loadedModel2) throw new Error('Model not loaded');
-
-        const step2 = qvac.translate({ modelId: loadedModel2.modelId, text: textToTranslate, stream: !!onStream });
-        if (onStream) {
-           let full = '';
-           for await (const token of step2.tokenStream) {
-              full += token;
-              onStream(full);
-           }
-           currentText = full;
-        } else {
-           currentText = await step2.text;
         }
       }
 
       const totalMs = Date.now() - startTime;
-
-      // Log performance
       const perfEntry = createNmtLogEntry({
         variant: store.currentVariant,
         direction: route.requiresPivot ? 'xx-xx' : route.steps[0].from === 'en' ? 'en-xx' : 'xx-en',
-        srcLang,
-        dstLang,
+        srcLang: srcLang.code,
+        dstLang: dstLang.code,
         inputText: text,
         outputText: currentText,
         tokenCountSrc: text.split(/\s+/).length,
@@ -386,21 +279,14 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       logPerfEvent(perfEntry);
 
       store.setLoading(false);
-      return {
-        translatedText: currentText,
-        route,
-        intermediateText,
-        totalMs,
-      };
+      return { translatedText: currentText, route, intermediateText, totalMs };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al traducir';
       store.setError(message);
       store.setLoading(false);
       throw err;
     }
-  }, []);
-
-  // ─── Transcription ──────────────────────────────────────────────────────
+  }, [loadExclusive]);
 
   const transcribeAudio = useCallback(async (audioUri: string) => {
     const store = useEngineStore.getState();
@@ -409,31 +295,25 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       store.setLoading(true, 'Transcribiendo audio...');
 
       if (!qvacRef.current) throw new Error('SDK no inicializado');
-      if (!store.whisperModelId) throw new Error('ASR model not loaded');
+      
+      const actualWhisperSrc = qvacRef.current[WHISPER_MODEL_CONFIG.modelSrc];
+      const modelId = await loadExclusive(actualWhisperSrc, WHISPER_MODEL_CONFIG.modelType);
 
       const result = await qvacRef.current.transcribe({
-         modelId: store.whisperModelId,
+         modelId,
          audioChunk: audioUri
       });
 
-      const latency = Date.now() - startTime;
-      console.log(`[Engine] Transcribed in ${latency}ms`);
-
+      console.log(`[Engine] Transcribed in ${Date.now() - startTime}ms`);
       store.setLoading(false);
-      return {
-        text: await result.text,
-        language: 'es',
-        confidence: 0.92,
-      };
+      return { text: await result.text, language: 'es', confidence: 0.92 };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al transcribir';
       store.setError(message);
       store.setLoading(false);
       throw err;
     }
-  }, []);
-
-  // ─── Text-to-Speech ─────────────────────────────────────────────────────
+  }, [loadExclusive]);
 
   const synthesizeSpeech = useCallback(async (text: string, language: string) => {
     const store = useEngineStore.getState();
@@ -441,10 +321,12 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       store.setLoading(true, 'Sintetizando voz...');
 
       if (!qvacRef.current) throw new Error('SDK no inicializado');
-      if (!store.ttsModelId) throw new Error('TTS model not loaded');
+      
+      const actualTtsSrc = qvacRef.current[TTS_MODEL_CONFIG.modelSrc];
+      const modelId = await loadExclusive(actualTtsSrc, TTS_MODEL_CONFIG.modelType);
 
       const result = qvacRef.current.textToSpeech({
-        modelId: store.ttsModelId,
+        modelId,
         text,
         language,
         stream: false,
@@ -456,7 +338,6 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       
       const wavBuffer = new ArrayBuffer(44 + buffer.byteLength);
       const view = new DataView(wavBuffer);
-      
       writeWavHeader(view, sampleRate, numChannels, buffer.byteLength);
       
       const pcmData = new Uint8Array(buffer);
@@ -466,94 +347,72 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       const base64 = arrayBufferToBase64(wavBuffer);
       const uri = cacheDirectory + 'tts_' + Date.now() + '.wav';
       
-      await writeAsStringAsync(uri, base64, {
-        encoding: EncodingType.Base64,
-      });
+      await writeAsStringAsync(uri, base64, { encoding: EncodingType.Base64 });
 
       store.setLoading(false);
-      return {
-        uri,
-        sampleRate,
-      };
+      return { uri, sampleRate };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al sintetizar voz';
       store.setError(message);
       store.setLoading(false);
       throw err;
     }
-  }, []);
-
-  // ─── Model Management ───────────────────────────────────────────────────
+  }, [loadExclusive]);
 
   const preloadModels = useCallback(async (srcLang: string, dstLang: string) => {
     const store = useEngineStore.getState();
     const route = getTranslationRoute(srcLang, dstLang);
-
-    store.setLoading(true, 'Cargando modelos...');
+    store.setLoading(true, 'Descargando modelos...');
 
     try {
+      const qvac = qvacRef.current;
+      if (!qvac || !qvac.downloadAsset) {
+        console.warn('[Engine] downloadAsset not available, skipping prefetch');
+        store.setLoading(false);
+        return;
+      }
+
+      // Download NMT models
       for (const step of route.steps) {
-        const pairKey = step.modelPairKey;
-        if (!store.loadedNmtModels.has(pairKey)) {
-          const config = getModelConfig(step.from, step.to);
-          const actualModelSrc = qvacRef.current[config.modelSrc];
-          if (!actualModelSrc) throw new Error(`Model descriptor ${config.modelSrc} not found in SDK`);
-          const modelId = await qvacRef.current.loadModel({
-            modelSrc: actualModelSrc,
-            modelType: config.modelType,
-            modelConfig: {
-              from: step.from,
-              to: step.to,
-            }
-          });
-          store.cacheNmtModel(pairKey, modelId);
+        const config = getModelConfig(step.from, step.to);
+        const src = qvac[config.modelSrc];
+        if (src) {
+           await qvac.downloadAsset({
+              assetSrc: src,
+              onProgress: (p: any) => store.setProgress(p.percentage),
+           });
         }
       }
       
-      if (!store.whisperModelId) {
-         const actualWhisperSrc = qvacRef.current[WHISPER_MODEL_CONFIG.modelSrc];
-         if (!actualWhisperSrc) throw new Error(`Model descriptor ${WHISPER_MODEL_CONFIG.modelSrc} not found in SDK`);
-         const modelId = await qvacRef.current.loadModel({
-            modelSrc: actualWhisperSrc,
-            modelType: WHISPER_MODEL_CONFIG.modelType
+      // Download Whisper
+      const whisperSrc = qvac[WHISPER_MODEL_CONFIG.modelSrc];
+      if (whisperSrc) {
+         await qvac.downloadAsset({
+            assetSrc: whisperSrc,
+            onProgress: (p: any) => store.setProgress(p.percentage),
          });
-         store.setWhisperModelId(modelId);
       }
       
-      if (!store.ttsModelId) {
-         const actualTtsSrc = qvacRef.current[TTS_MODEL_CONFIG.modelSrc];
-         if (!actualTtsSrc) throw new Error(`Model descriptor ${TTS_MODEL_CONFIG.modelSrc} not found in SDK`);
-         const modelId = await qvacRef.current.loadModel({
-            modelSrc: actualTtsSrc,
-            modelType: TTS_MODEL_CONFIG.modelType
+      // Download TTS
+      const ttsSrc = qvac[TTS_MODEL_CONFIG.modelSrc];
+      if (ttsSrc) {
+         await qvac.downloadAsset({
+            assetSrc: ttsSrc,
+            onProgress: (p: any) => store.setProgress(p.percentage),
          });
-         store.setTtsModelId(modelId);
       }
     } catch (err) {
-      console.error('[Engine] Error preloading models:', err);
+      console.error('[Engine] Error prefetching models:', err);
     }
-
     store.setLoading(false);
   }, []);
 
   const unloadAllModels = useCallback(async () => {
     const store = useEngineStore.getState();
-
-    try {
-      for (const [key, model] of store.loadedNmtModels) {
-        await qvacRef.current.unloadModel({ modelId: model.modelId }).catch(() => {});
-      }
-      if (store.whisperModelId) {
-        await qvacRef.current.unloadModel({ modelId: store.whisperModelId }).catch(() => {});
-      }
-      if (store.ttsModelId) {
-        await qvacRef.current.unloadModel({ modelId: store.ttsModelId }).catch(() => {});
-      }
-    } catch (err) {
-      console.error(err);
+    if (store.currentModelId && qvacRef.current) {
+      await qvacRef.current.unloadModel({ modelId: store.currentModelId }).catch(() => {});
     }
-
-    store.clearAllModels();
+    store.setCurrentModel(null, null);
     console.log('[Engine] All models unloaded');
   }, []);
 
