@@ -9,8 +9,8 @@ import React, { createContext, useContext, useEffect, useRef, useCallback } from
 import { AppState, type AppStateStatus } from 'react-native';
 import { create } from 'zustand';
 import { writeAsStringAsync, cacheDirectory, EncodingType } from 'expo-file-system/legacy';
-import { createDownloadResumable, getInfoAsync, makeDirectoryAsync } from 'expo-file-system';
-import { documentDirectory } from 'expo-file-system/legacy';
+
+import { documentDirectory, createDownloadResumable, getInfoAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
 import {
   getTranslationRoute,
   prependTargetTag,
