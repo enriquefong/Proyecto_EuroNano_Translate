@@ -20,6 +20,7 @@ import {
   Animated,
   Pressable,
 } from 'react-native';
+import { useAudioPlayer, useAudioRecorder, AudioModule } from 'expo-audio';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, glassStyles } from '../theme/theme';
@@ -40,6 +41,8 @@ interface ConversationMessage {
 
 export function ConversationModeScreen() {
   const engine = useEngine();
+  const player = useAudioPlayer(null as any);
+  const recorder = useAudioRecorder({} as any);
   const [langA, setLangA] = useState<Language>(LANGUAGE_MAP['es']);
   const [langB, setLangB] = useState<Language>(LANGUAGE_MAP['fr']);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -63,7 +66,10 @@ export function ConversationModeScreen() {
     setMessages([]);
   }, []);
 
-  const handleSpeakStart = useCallback((speaker: 'A' | 'B') => {
+  const handleSpeakStart = useCallback(async (speaker: 'A' | 'B') => {
+    try {
+      await AudioModule.requestRecordingPermissionsAsync();
+    } catch (e) { /* already granted */ }
     setActiveSpeaker(speaker);
     const scaleAnim = speaker === 'A' ? micScaleA : micScaleB;
     Animated.spring(scaleAnim, {
@@ -72,7 +78,14 @@ export function ConversationModeScreen() {
       damping: 10,
       stiffness: 200,
     }).start();
-  }, []);
+
+    try {
+      await recorder.record();
+    } catch (err) {
+      console.error('[Conversation] recorder.record() error:', err);
+      setActiveSpeaker(null);
+    }
+  }, [micScaleA, micScaleB, recorder]);
 
   const handleSpeakEnd = useCallback(async (speaker: 'A' | 'B') => {
     const scaleAnim = speaker === 'A' ? micScaleA : micScaleB;
@@ -90,8 +103,13 @@ export function ConversationModeScreen() {
     const dstLang = speaker === 'A' ? langB : langA;
 
     try {
+      // Stop recording and get URI
+      await recorder.stop();
+      const audioUri = recorder.uri;
+      if (!audioUri) throw new Error('No recording URI');
+
       // Step 1: ASR
-      const asrResult = await engine.transcribeAudio('mock://audio');
+      const asrResult = await engine.transcribeAudio(audioUri);
 
       // Step 2: NMT
       const route = engine.getRoute(srcLang.code, dstLang.code);
@@ -115,7 +133,11 @@ export function ConversationModeScreen() {
       setMessages(prev => [...prev, newMessage]);
 
       // Step 4: TTS (play on the other side)
-      await engine.synthesizeSpeech(nmtResult.translatedText, dstLang.code);
+      const ttsResult = await engine.synthesizeSpeech(nmtResult.translatedText, dstLang.code);
+      if (ttsResult && ttsResult.uri) {
+        player.replace(ttsResult.uri);
+        player.play();
+      }
     } catch (err) {
       console.error('[Conversation] Error:', err);
     } finally {

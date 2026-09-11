@@ -9,6 +9,7 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { create } from 'zustand';
+import { writeAsStringAsync, cacheDirectory, EncodingType } from 'expo-file-system/legacy';
 import {
   getTranslationRoute,
   prependTargetTag,
@@ -72,6 +73,55 @@ interface EngineState {
   clearAllModels: () => void;
   setWhisperModelId: (id: string | null) => void;
   setTtsModelId: (id: string | null) => void;
+}
+
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  if (typeof btoa !== 'undefined') {
+    return btoa(binary);
+  }
+  
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let base64 = '';
+  for (let i = 0; i < len; i += 3) {
+    base64 += chars[bytes[i] >> 2];
+    base64 += chars[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)];
+    base64 += chars[((bytes[i + 1] & 15) << 2) | (bytes[i + 2] >> 6)];
+    base64 += chars[bytes[i + 2] & 63];
+  }
+  if ((len % 3) === 2) {
+    base64 = base64.substring(0, base64.length - 1) + '=';
+  } else if ((len % 3) === 1) {
+    base64 = base64.substring(0, base64.length - 2) + '==';
+  }
+  return base64;
+}
+
+function writeWavHeader(view: DataView, sampleRate: number, numChannels: number, dataSize: number) {
+  const writeString = (v: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      v.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * 2, true);
+  view.setUint16(32, numChannels * 2, true);
+  view.setUint16(34, 16, true); // 16-bit
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
 }
 
 export const useEngineStore = create<EngineState>((set) => ({
@@ -140,7 +190,7 @@ interface EngineContextValue {
    * Returns the audio buffer for playback.
    */
   synthesizeSpeech: (text: string, language: string) => Promise<{
-    buffer: number[];
+    uri: string;
     sampleRate: number;
   }>;
 
@@ -363,7 +413,7 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
 
       const result = await qvacRef.current.transcribe({
          modelId: store.whisperModelId,
-         audioPath: audioUri
+         audioChunk: audioUri
       });
 
       const latency = Date.now() - startTime;
@@ -400,11 +450,30 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
         stream: false,
       });
       const buffer = await result.buffer;
+      
+      const numChannels = 1;
+      const sampleRate = TTS_MODEL_CONFIG.sampleRate;
+      
+      const wavBuffer = new ArrayBuffer(44 + buffer.byteLength);
+      const view = new DataView(wavBuffer);
+      
+      writeWavHeader(view, sampleRate, numChannels, buffer.byteLength);
+      
+      const pcmData = new Uint8Array(buffer);
+      const wavData = new Uint8Array(wavBuffer);
+      wavData.set(pcmData, 44);
+      
+      const base64 = arrayBufferToBase64(wavBuffer);
+      const uri = cacheDirectory + 'tts_' + Date.now() + '.wav';
+      
+      await writeAsStringAsync(uri, base64, {
+        encoding: EncodingType.Base64,
+      });
 
       store.setLoading(false);
       return {
-        buffer,
-        sampleRate: TTS_MODEL_CONFIG.sampleRate,
+        uri,
+        sampleRate,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al sintetizar voz';

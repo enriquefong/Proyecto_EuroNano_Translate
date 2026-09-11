@@ -22,6 +22,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useAudioPlayer } from 'expo-audio';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, shadows, glassStyles } from '../theme/theme';
@@ -36,6 +37,7 @@ const DEBOUNCE_MS = 400;
 
 export function TextModeScreen() {
   const engine = useEngine();
+  const player = useAudioPlayer(null as any);
   const [srcLang, setSrcLang] = useState<Language>(LANGUAGE_MAP['es']);
   const [dstLang, setDstLang] = useState<Language>(LANGUAGE_MAP['en']);
   const [inputText, setInputText] = useState('');
@@ -114,11 +116,15 @@ export function TextModeScreen() {
 
   const handlePlayTTS = useCallback(async (text: string, lang: string) => {
     try {
-      await engine.synthesizeSpeech(text, lang);
+      const result = await engine.synthesizeSpeech(text, lang);
+      if (result.uri) {
+        player.replace(result.uri);
+        player.play();
+      }
     } catch (err) {
       console.error('[TextMode] TTS error:', err);
     }
-  }, [engine]);
+  }, [engine, player]);
 
   const swapRotation = swapAnim.interpolate({
     inputRange: [0, 1],

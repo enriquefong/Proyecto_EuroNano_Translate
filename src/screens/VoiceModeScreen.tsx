@@ -21,6 +21,7 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
+import { useAudioPlayer, useAudioRecorder, AudioModule } from 'expo-audio';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, glassStyles } from '../theme/theme';
@@ -35,6 +36,8 @@ type VoiceState = 'idle' | 'recording' | 'transcribing' | 'reviewing' | 'transla
 
 export function VoiceModeScreen() {
   const engine = useEngine();
+  const player = useAudioPlayer(null as any);
+  const recorder = useAudioRecorder({} as any);
   const [srcLang, setSrcLang] = useState<Language>(LANGUAGE_MAP['es']);
   const [dstLang, setDstLang] = useState<Language>(LANGUAGE_MAP['en']);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
@@ -53,7 +56,10 @@ export function VoiceModeScreen() {
   }, [srcLang.code, dstLang.code, engine]);
 
   // Microphone press handlers
-  const handleMicPressIn = useCallback(() => {
+  const handleMicPressIn = useCallback(async () => {
+    try {
+      await AudioModule.requestRecordingPermissionsAsync();
+    } catch (e) { /* already granted */ }
     setVoiceState('recording');
     Animated.spring(micScaleAnim, {
       toValue: 1.15,
@@ -62,7 +68,6 @@ export function VoiceModeScreen() {
       stiffness: 200,
     }).start();
 
-    // Start pulse animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.3, duration: 800, useNativeDriver: true }),
@@ -70,8 +75,13 @@ export function VoiceModeScreen() {
       ]),
     ).start();
 
-    // In production: start audio recording via expo-av
-  }, []);
+    try {
+      await recorder.record();
+    } catch (err) {
+      console.error('[VoiceMode] recorder.record() error:', err);
+      setVoiceState('idle');
+    }
+  }, [recorder, micScaleAnim, pulseAnim]);
 
   const handleMicPressOut = useCallback(async () => {
     Animated.spring(micScaleAnim, {
@@ -85,7 +95,10 @@ export function VoiceModeScreen() {
     // Transcribe
     setVoiceState('transcribing');
     try {
-      const result = await engine.transcribeAudio('mock://audio');
+      await recorder.stop();
+      const audioUri = recorder.uri;
+      if (!audioUri) throw new Error('No recording URI');
+      const result = await engine.transcribeAudio(audioUri);
       setTranscribedText(result.text);
       setConfidence(result.confidence);
       setVoiceState('reviewing');
@@ -93,7 +106,7 @@ export function VoiceModeScreen() {
       console.error('[VoiceMode] ASR error:', err);
       setVoiceState('idle');
     }
-  }, [engine]);
+  }, [engine, recorder]);
 
   // Translate transcribed text
   const handleTranslate = useCallback(async () => {
@@ -110,7 +123,11 @@ export function VoiceModeScreen() {
       setVoiceState('playing');
 
       // Auto-play TTS
-      await engine.synthesizeSpeech(result.translatedText, dstLang.code);
+      const ttsResult = await engine.synthesizeSpeech(result.translatedText, dstLang.code);
+      if (ttsResult && ttsResult.uri) {
+        player.replace(ttsResult.uri);
+        player.play();
+      }
       setVoiceState('idle');
     } catch (err) {
       console.error('[VoiceMode] Translation error:', err);
@@ -278,7 +295,13 @@ export function VoiceModeScreen() {
                 {dstLang.flag} Traducción
               </Text>
               <TouchableOpacity
-                onPress={() => engine.synthesizeSpeech(translatedText, dstLang.code)}
+                onPress={async () => {
+                const res = await engine.synthesizeSpeech(translatedText, dstLang.code);
+                if (res.uri) {
+                  player.replace(res.uri);
+                  player.play();
+                }
+              }}
                 style={styles.ttsButton}
               >
                 <Feather name="volume-2" size={22} color={colors.accent.primaryLight} />
