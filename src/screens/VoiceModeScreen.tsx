@@ -21,8 +21,10 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { useAudioPlayer, useAudioRecorder, AudioModule } from 'expo-audio';
+import { useAudioPlayer } from 'expo-audio';
+import { AudioStudioModule, useAudioRecorder } from '@siteed/audio-studio';
 import { Feather } from '@expo/vector-icons';
+import { toByteArray } from 'base64-js';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, glassStyles } from '../theme/theme';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -37,7 +39,7 @@ type VoiceState = 'idle' | 'recording' | 'transcribing' | 'reviewing' | 'transla
 export function VoiceModeScreen() {
   const engine = useEngine();
   const player = useAudioPlayer(null as any);
-  const recorder = useAudioRecorder({} as any);
+  const { startRecording, stopRecording } = useAudioRecorder();
   const [srcLang, setSrcLang] = useState<Language>(LANGUAGE_MAP['es']);
   const [dstLang, setDstLang] = useState<Language>(LANGUAGE_MAP['en']);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
@@ -58,7 +60,7 @@ export function VoiceModeScreen() {
   // Microphone press handlers
   const handleMicPressIn = useCallback(async () => {
     try {
-      await AudioModule.requestRecordingPermissionsAsync();
+      await AudioStudioModule.requestPermissionsAsync();
     } catch (e) { /* already granted */ }
     setVoiceState('recording');
     Animated.spring(micScaleAnim, {
@@ -76,12 +78,12 @@ export function VoiceModeScreen() {
     ).start();
 
     try {
-      await recorder.record();
+      await startRecording, stopRecording.record();
     } catch (err) {
-      console.error('[VoiceMode] recorder.record() error:', err);
+      console.error('[VoiceMode] startRecording, stopRecording.record() error:', err);
       setVoiceState('idle');
     }
-  }, [recorder, micScaleAnim, pulseAnim]);
+  }, [startRecording, stopRecording, micScaleAnim, pulseAnim]);
 
   const handleMicPressOut = useCallback(async () => {
     Animated.spring(micScaleAnim, {
@@ -95,8 +97,8 @@ export function VoiceModeScreen() {
     // Transcribe
     setVoiceState('transcribing');
     try {
-      await recorder.stop();
-      const audioUri = recorder.uri;
+      const stopResult = await stopRecording();
+      const audioUri = stopResult.fileUri;
       if (!audioUri) throw new Error('No recording URI');
       const result = await engine.transcribeAudio(audioUri);
       setTranscribedText(result.text);
@@ -106,7 +108,7 @@ export function VoiceModeScreen() {
       console.error('[VoiceMode] ASR error:', err);
       setVoiceState('idle');
     }
-  }, [engine, recorder]);
+  }, [engine, startRecording, stopRecording]);
 
   // Translate transcribed text
   const handleTranslate = useCallback(async () => {

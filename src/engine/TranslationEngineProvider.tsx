@@ -239,6 +239,7 @@ export function TranslationEngineProvider({ children }: { children: React.ReactN
         const step = route.steps[i];
         const config = getModelConfig(step.from, step.to);
         const actualModelSrc = qvacRef.current[config.modelSrc];
+        if (!actualModelSrc) throw new Error(`Modelo no encontrado en el SDK: ${config.modelSrc}`);
 
         const modelId = await loadExclusive(actualModelSrc, config.modelType, { from: step.from, to: step.to });
 
@@ -297,11 +298,14 @@ export function TranslationEngineProvider({ children }: { children: React.ReactN
       if (!qvacRef.current) throw new Error('SDK no inicializado');
       
       const actualWhisperSrc = qvacRef.current[WHISPER_MODEL_CONFIG.modelSrc];
+      if (!actualWhisperSrc) throw new Error(`Modelo no encontrado: ${WHISPER_MODEL_CONFIG.modelSrc}`);
+      
+      const cleanUri = audioUri.replace(/^file:\/+/, '/');
       const modelId = await loadExclusive(actualWhisperSrc, WHISPER_MODEL_CONFIG.modelType);
 
       const result = await qvacRef.current.transcribe({
          modelId,
-         audioChunk: audioUri
+         audioChunk: cleanUri
       });
 
       console.log(`[Engine] Transcribed in ${Date.now() - startTime}ms`);

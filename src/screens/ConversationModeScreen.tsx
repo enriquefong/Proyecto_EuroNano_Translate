@@ -20,8 +20,10 @@ import {
   Animated,
   Pressable,
 } from 'react-native';
-import { useAudioPlayer, useAudioRecorder, AudioModule } from 'expo-audio';
+import { useAudioPlayer } from 'expo-audio';
+import { AudioStudioModule, useAudioRecorder } from '@siteed/audio-studio';
 import { Feather } from '@expo/vector-icons';
+import { toByteArray } from 'base64-js';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius, glassStyles } from '../theme/theme';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -42,7 +44,7 @@ interface ConversationMessage {
 export function ConversationModeScreen() {
   const engine = useEngine();
   const player = useAudioPlayer(null as any);
-  const recorder = useAudioRecorder({} as any);
+  const { startRecording, stopRecording } = useAudioRecorder();
   const [langA, setLangA] = useState<Language>(LANGUAGE_MAP['es']);
   const [langB, setLangB] = useState<Language>(LANGUAGE_MAP['fr']);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -68,7 +70,7 @@ export function ConversationModeScreen() {
 
   const handleSpeakStart = useCallback(async (speaker: 'A' | 'B') => {
     try {
-      await AudioModule.requestRecordingPermissionsAsync();
+      await AudioStudioModule.requestPermissionsAsync();
     } catch (e) { /* already granted */ }
     setActiveSpeaker(speaker);
     const scaleAnim = speaker === 'A' ? micScaleA : micScaleB;
@@ -79,13 +81,20 @@ export function ConversationModeScreen() {
       stiffness: 200,
     }).start();
 
+    const recordingOptions = {
+      sampleRate: 16000,
+      channels: 1,
+      encoding: 'pcm_16bit',
+      keepAwake: false
+    };
     try {
-      await recorder.record();
-    } catch (err) {
-      console.error('[Conversation] recorder.record() error:', err);
-      setActiveSpeaker(null);
+      await startRecording(recordingOptions);
+    } catch (err: any) {
+      if (err?.code !== 'ALREADY_RECORDING') throw err;
+      await stopRecording().catch(() => {});
+      await startRecording(recordingOptions);
     }
-  }, [micScaleA, micScaleB, recorder]);
+  }, [micScaleA, micScaleB, startRecording, stopRecording]);
 
   const handleSpeakEnd = useCallback(async (speaker: 'A' | 'B') => {
     const scaleAnim = speaker === 'A' ? micScaleA : micScaleB;
@@ -104,8 +113,8 @@ export function ConversationModeScreen() {
 
     try {
       // Stop recording and get URI
-      await recorder.stop();
-      const audioUri = recorder.uri;
+      const stopResult = await stopRecording();
+      const audioUri = stopResult.fileUri;
       if (!audioUri) throw new Error('No recording URI');
 
       // Step 1: ASR
