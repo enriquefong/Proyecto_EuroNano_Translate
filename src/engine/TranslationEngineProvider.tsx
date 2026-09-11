@@ -258,20 +258,62 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
         // Direct translation
         const targetTag = route.steps[0].targetTag;
         const textToTranslate = targetTag ? `${targetTag} ${text}` : text;
-        const result = await qvac.Translation.translate(textToTranslate, onStream);
+        const pairKey = route.steps[0].modelPairKey;
+        const loadedModel = store.loadedNmtModels.get(pairKey);
+        if (!loadedModel) throw new Error('Model not loaded');
+        
+        const result = qvac.translate({
+           modelId: loadedModel.modelId,
+           text: textToTranslate,
+           stream: !!onStream
+        });
+        
+        if (onStream) {
+           let full = '';
+           for await (const token of result.tokenStream) {
+              full += token;
+              onStream(full);
+           }
+           currentText = full;
+        } else {
+           currentText = await result.text;
+        }
         intermediateText = undefined;
-        currentText = result.text;
       } else {
         // Pivot translation
-        // Step 1: src -> en
-        const step1 = await qvac.Translation.translate(text, onStream);
-        intermediateText = step1.text;
+        const pairKey1 = route.steps[0].modelPairKey;
+        const loadedModel1 = store.loadedNmtModels.get(pairKey1);
+        if (!loadedModel1) throw new Error('Model not loaded');
+        
+        const step1 = qvac.translate({ modelId: loadedModel1.modelId, text, stream: !!onStream });
+        if (onStream) {
+           let full = '';
+           for await (const token of step1.tokenStream) {
+              full += token;
+              onStream(full);
+           }
+           intermediateText = full;
+        } else {
+           intermediateText = await step1.text;
+        }
 
-        // Step 2: en -> dst (with tag)
         const targetTag = route.steps[1].targetTag;
         const textToTranslate = targetTag ? `${targetTag} ${intermediateText}` : intermediateText;
-        const step2 = await qvac.Translation.translate(textToTranslate, onStream);
-        currentText = step2.text;
+        const pairKey2 = route.steps[1].modelPairKey;
+        const loadedModel2 = store.loadedNmtModels.get(pairKey2);
+        if (!loadedModel2) throw new Error('Model not loaded');
+
+        const step2 = qvac.translate({ modelId: loadedModel2.modelId, text: textToTranslate, stream: !!onStream });
+        if (onStream) {
+           let full = '';
+           for await (const token of step2.tokenStream) {
+              full += token;
+              onStream(full);
+           }
+           currentText = full;
+        } else {
+           currentText = await step2.text;
+        }
       }
 
       const totalMs = Date.now() - startTime;
@@ -317,15 +359,19 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       store.setLoading(true, 'Transcribiendo audio...');
 
       if (!qvacRef.current) throw new Error('SDK no inicializado');
+      if (!store.whisperModelId) throw new Error('ASR model not loaded');
 
-      const result = await qvacRef.current.ASR.transcribe(audioUri);
+      const result = await qvacRef.current.transcribe({
+         modelId: store.whisperModelId,
+         audioPath: audioUri
+      });
 
       const latency = Date.now() - startTime;
       console.log(`[Engine] Transcribed in ${latency}ms`);
 
       store.setLoading(false);
       return {
-        text: result.text,
+        text: await result.text,
         language: 'es',
         confidence: 0.92,
       };
@@ -344,19 +390,16 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
     try {
       store.setLoading(true, 'Sintetizando voz...');
 
-      // In production:
-      // const result = qvacRef.current.textToSpeech({
-      //   modelId: store.ttsModelId,
-      //   text,
-      //   inputType: 'text',
-      //   language,
-      //   stream: false,
-      // });
-      // const buffer = await result.buffer;
+      if (!qvacRef.current) throw new Error('SDK no inicializado');
+      if (!store.ttsModelId) throw new Error('TTS model not loaded');
 
-      // Mock for development
-      await new Promise(resolve => setTimeout(resolve, 300));
-      const buffer: number[] = [];
+      const result = qvacRef.current.textToSpeech({
+        modelId: store.ttsModelId,
+        text,
+        language,
+        stream: false,
+      });
+      const buffer = await result.buffer;
 
       store.setLoading(false);
       return {
@@ -377,29 +420,42 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
     const store = useEngineStore.getState();
     const route = getTranslationRoute(srcLang, dstLang);
 
-    store.setLoading(true, 'Cargando modelos de traducción...');
+    store.setLoading(true, 'Cargando modelos...');
 
-    for (const step of route.steps) {
-      const pairKey = step.modelPairKey;
-      if (!store.loadedNmtModels.has(pairKey)) {
-        const config = getModelConfig(step.from, step.to);
-
-        // In production:
-        // const modelId = await qvacRef.current.loadModel({
-        //   modelSrc: config.modelSrc,
-        //   modelConfig: {
-        //     engine: config.engine,
-        //     from: step.from,
-        //     to: step.to,
-        //   },
-        //   onProgress: (p) => {
-        //     store.setProgress(p.percentage);
-        //   },
-        // });
-        // store.cacheNmtModel(pairKey, modelId);
-
-        console.log(`[Engine] Would load model: ${pairKey}`);
+    try {
+      for (const step of route.steps) {
+        const pairKey = step.modelPairKey;
+        if (!store.loadedNmtModels.has(pairKey)) {
+          const config = getModelConfig(step.from, step.to);
+          const modelId = await qvacRef.current.loadModel({
+            modelSrc: config.modelSrc,
+            modelType: config.modelType,
+            modelConfig: {
+              from: step.from,
+              to: step.to,
+            }
+          });
+          store.cacheNmtModel(pairKey, modelId);
+        }
       }
+      
+      if (!store.whisperModelId) {
+         const modelId = await qvacRef.current.loadModel({
+            modelSrc: WHISPER_MODEL_CONFIG.modelSrc,
+            modelType: WHISPER_MODEL_CONFIG.modelType
+         });
+         store.setWhisperModelId(modelId);
+      }
+      
+      if (!store.ttsModelId) {
+         const modelId = await qvacRef.current.loadModel({
+            modelSrc: TTS_MODEL_CONFIG.modelSrc,
+            modelType: TTS_MODEL_CONFIG.modelType
+         });
+         store.setTtsModelId(modelId);
+      }
+    } catch (err) {
+      console.error('[Engine] Error preloading models:', err);
     }
 
     store.setLoading(false);
@@ -408,16 +464,19 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
   const unloadAllModels = useCallback(async () => {
     const store = useEngineStore.getState();
 
-    // In production: unload all cached models
-    // for (const [key, model] of store.loadedNmtModels) {
-    //   await qvacRef.current.unloadModel({ modelId: model.modelId });
-    // }
-    // if (store.whisperModelId) {
-    //   await qvacRef.current.unloadModel({ modelId: store.whisperModelId });
-    // }
-    // if (store.ttsModelId) {
-    //   await qvacRef.current.unloadModel({ modelId: store.ttsModelId });
-    // }
+    try {
+      for (const [key, model] of store.loadedNmtModels) {
+        await qvacRef.current.unloadModel({ modelId: model.modelId }).catch(() => {});
+      }
+      if (store.whisperModelId) {
+        await qvacRef.current.unloadModel({ modelId: store.whisperModelId }).catch(() => {});
+      }
+      if (store.ttsModelId) {
+        await qvacRef.current.unloadModel({ modelId: store.ttsModelId }).catch(() => {});
+      }
+    } catch (err) {
+      console.error(err);
+    }
 
     store.clearAllModels();
     console.log('[Engine] All models unloaded');
