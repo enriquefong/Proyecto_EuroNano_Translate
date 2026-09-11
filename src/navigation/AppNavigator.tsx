@@ -29,16 +29,10 @@ function TabIcon({ name, label, focused, color }: TabIconProps) {
     <View style={styles.tabIconContainer}>
       <Feather 
         name={name} 
-        size={22} 
+        size={24} 
         color={color} 
         style={{ opacity: focused ? 1 : 0.6 }} 
       />
-      <Text style={[
-        styles.tabLabel,
-        { color, opacity: focused ? 1 : 0.7 },
-      ]}>
-        {label}
-      </Text>
     </View>
   );
 }
@@ -101,9 +95,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg.secondary,
     borderTopWidth: 1,
     borderTopColor: colors.border.subtle,
-    height: 72,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    height: 60,
     elevation: 0,
     shadowOpacity: 0,
   },

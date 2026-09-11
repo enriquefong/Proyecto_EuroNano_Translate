@@ -81,7 +81,7 @@ export function LanguageSelector({
         >
           <Text style={styles.flag}>{selectedLang?.flag}</Text>
           <View style={styles.langInfo}>
-            <Text style={styles.langName}>{selectedLang?.nativeName}</Text>
+            <Text style={styles.langName} numberOfLines={1} adjustsFontSizeToFit>{selectedLang?.nativeName}</Text>
             <Text style={styles.langCode}>{selectedLang?.code.toUpperCase()}</Text>
           </View>
           <Feather name="chevron-down" size={16} color={accentColor} style={{ opacity: 0.8 }} />
@@ -153,8 +153,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: borderRadius.lg,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.base,
-    gap: spacing.md,
+    paddingHorizontal: spacing.sm,
+    gap: spacing.sm,
   },
   flag: {
     fontSize: 28,

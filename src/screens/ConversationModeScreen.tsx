@@ -252,35 +252,6 @@ export function ConversationModeScreen() {
 
       {/* Side A (normal orientation) */}
       <View style={styles.speakerSideA}>
-        <View style={styles.speakerLabel}>
-          <Text style={styles.speakerLabelText}>
-            {langA.flag} {langA.nativeName}
-          </Text>
-        </View>
-
-        {/* A's mic button */}
-        <Animated.View style={{ transform: [{ scale: micScaleA }] }}>
-          <Pressable
-            onPressIn={() => handleSpeakStart('A')}
-            onPressOut={() => handleSpeakEnd('A')}
-            disabled={isProcessing || activeSpeaker === 'B'}
-            style={[
-              styles.speakerMic,
-              { backgroundColor: colors.accent.primary },
-              (isProcessing || activeSpeaker === 'B') && styles.micDisabled,
-            ]}
-          >
-            <Feather 
-              name={activeSpeaker === 'A' ? 'square' : 'mic'} 
-              size={22} 
-              color="#FFFFFF" 
-            />
-            {activeSpeaker === 'A' && (
-              <WaveformIndicator isActive={true} color="#FFFFFF" barCount={3} height={20} />
-            )}
-          </Pressable>
-        </Animated.View>
-
         {/* A's chat bubbles */}
         <ScrollView
           ref={scrollRefA}
@@ -305,6 +276,35 @@ export function ConversationModeScreen() {
             </View>
           ))}
         </ScrollView>
+
+        {/* A's mic button */}
+        <Animated.View style={{ transform: [{ scale: micScaleA }] }}>
+          <Pressable
+            onPressIn={() => handleSpeakStart('A')}
+            onPressOut={() => handleSpeakEnd('A')}
+            disabled={isProcessing || activeSpeaker === 'B'}
+            style={[
+              styles.speakerMic,
+              { backgroundColor: colors.accent.primary },
+              (isProcessing || activeSpeaker === 'B') && styles.micDisabled,
+            ]}
+          >
+            <Feather 
+              name={activeSpeaker === 'A' ? 'square' : 'mic'} 
+              size={22} 
+              color="#FFFFFF" 
+            />
+            {activeSpeaker === 'A' && (
+              <WaveformIndicator isActive={true} color="#FFFFFF" barCount={3} height={20} />
+            )}
+          </Pressable>
+        </Animated.View>
+
+        <View style={styles.speakerLabel}>
+          <Text style={styles.speakerLabelText}>
+            {langA.flag} {langA.nativeName}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -393,6 +393,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: spacing.base,
     gap: spacing.sm,
+    justifyContent: 'center',
   },
   speakerSideB: {
     flex: 1,
@@ -402,6 +403,7 @@ const styles = StyleSheet.create({
   rotatedContent: {
     flex: 1,
     gap: spacing.sm,
+    justifyContent: 'center',
   },
   speakerLabel: {
     alignItems: 'center',
@@ -430,7 +432,8 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   chatArea: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
   },
   chatContent: {
     gap: spacing.sm,
