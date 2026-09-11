@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    "@qvac/sdk/asr-ggml/plugin",
+    "@qvac/sdk/tts-ggml/plugin",
+    "@qvac/sdk/translation-nmtcpp/plugin"
+  ],
+  "loggerConsoleOutput": true,
+  "loggerLevel": "info"
+}
