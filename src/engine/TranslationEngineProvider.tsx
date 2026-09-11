@@ -427,8 +427,10 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
         const pairKey = step.modelPairKey;
         if (!store.loadedNmtModels.has(pairKey)) {
           const config = getModelConfig(step.from, step.to);
+          const actualModelSrc = qvacRef.current[config.modelSrc];
+          if (!actualModelSrc) throw new Error(`Model descriptor ${config.modelSrc} not found in SDK`);
           const modelId = await qvacRef.current.loadModel({
-            modelSrc: config.modelSrc,
+            modelSrc: actualModelSrc,
             modelType: config.modelType,
             modelConfig: {
               from: step.from,
@@ -440,16 +442,20 @@ export function TranslationEngineProvider({ children }: ProviderProps) {
       }
       
       if (!store.whisperModelId) {
+         const actualWhisperSrc = qvacRef.current[WHISPER_MODEL_CONFIG.modelSrc];
+         if (!actualWhisperSrc) throw new Error(`Model descriptor ${WHISPER_MODEL_CONFIG.modelSrc} not found in SDK`);
          const modelId = await qvacRef.current.loadModel({
-            modelSrc: WHISPER_MODEL_CONFIG.modelSrc,
+            modelSrc: actualWhisperSrc,
             modelType: WHISPER_MODEL_CONFIG.modelType
          });
          store.setWhisperModelId(modelId);
       }
       
       if (!store.ttsModelId) {
+         const actualTtsSrc = qvacRef.current[TTS_MODEL_CONFIG.modelSrc];
+         if (!actualTtsSrc) throw new Error(`Model descriptor ${TTS_MODEL_CONFIG.modelSrc} not found in SDK`);
          const modelId = await qvacRef.current.loadModel({
-            modelSrc: TTS_MODEL_CONFIG.modelSrc,
+            modelSrc: actualTtsSrc,
             modelType: TTS_MODEL_CONFIG.modelType
          });
          store.setTtsModelId(modelId);

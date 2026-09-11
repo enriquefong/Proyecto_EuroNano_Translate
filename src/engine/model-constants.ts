@@ -137,7 +137,7 @@ export function getDirectPairs(): string[] {
 
 export const WHISPER_MODEL_CONFIG = {
   /** Model source for Whisper tiny multilingual */
-  modelSrc: 'WHISPER_TINY_MULTILINGUAL',
+  modelSrc: 'WHISPER_TINY',
   modelType: 'whisper' as const,
   /** Supported languages for ASR (subset of our translation languages) */
   supportedLanguages: ['en', 'de', 'es', 'fr', 'it', 'pt', 'fi', 'cs', 'nl', 'sv'],
