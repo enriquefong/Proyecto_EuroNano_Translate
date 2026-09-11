@@ -1,0 +1,60 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build Unsigned APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Decode Keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo $ANDROID_KEYSTORE_BASE64 | base64 -d > euronano.jks
+
+      - name: Sign APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          # Alinear el APK
+          $BUILD_TOOLS_DIR/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
+          # Firmar el APK
+          $BUILD_TOOLS_DIR/apksigner sign --ks euronano.jks --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEYSTORE_PASSWORD --out euronano-translate.apk app-release-aligned.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: euronano-translate.apk
+          name: EuroNano Translate ${{ github.ref_name }}
