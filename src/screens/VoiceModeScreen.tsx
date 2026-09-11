@@ -78,7 +78,7 @@ export function VoiceModeScreen() {
     ).start();
 
     try {
-      await startRecording, stopRecording.record();
+      await startRecording({ sampleRate: 16000 as any, channels: 1 as 1, encoding: 'pcm_16bit' as any, keepAwake: false });
     } catch (err) {
       console.error('[VoiceMode] startRecording, stopRecording.record() error:', err);
       setVoiceState('idle');

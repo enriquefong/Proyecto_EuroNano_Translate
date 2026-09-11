@@ -96,10 +96,13 @@ export const MODEL_VARIANTS: ModelVariantInfo[] = [
  *   - xx→en: Any of the 9 European languages to English
  */
 
+export const HF_BASE_URL = 'https://huggingface.co/qvac/TranslatePsy-EuroNano/resolve/main';
+export const HF_VARIANT = 'Tiny';
+
 export interface TranslationModelConfig {
   from: string;
   to: string;
-  /** QVAC SDK model constant name or HuggingFace URL */
+  /** direction: 'en-xx' or 'xx-en' */
   modelSrc: string;
   engine: 'Bergamot';
   modelType: 'nmtcpp-translation';
@@ -107,13 +110,13 @@ export interface TranslationModelConfig {
 
 /**
  * Maps a language pair key (e.g. "en-es", "es-en") to its model config.
- * For xx→xx pairs, the pivot router handles the two-hop translation.
  */
 export function getModelConfig(from: string, to: string): TranslationModelConfig {
+  const direction = from === 'en' ? 'en-xx' : 'xx-en';
   return {
     from,
     to,
-    modelSrc: `BERGAMOT_${from.toUpperCase()}_${to.toUpperCase()}`,
+    modelSrc: direction,
     engine: 'Bergamot',
     modelType: 'nmtcpp-translation',
   };

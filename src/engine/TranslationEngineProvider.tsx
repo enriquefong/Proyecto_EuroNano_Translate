@@ -9,6 +9,8 @@ import React, { createContext, useContext, useEffect, useRef, useCallback } from
 import { AppState, type AppStateStatus } from 'react-native';
 import { create } from 'zustand';
 import { writeAsStringAsync, cacheDirectory, EncodingType } from 'expo-file-system/legacy';
+import { createDownloadResumable, getInfoAsync, makeDirectoryAsync } from 'expo-file-system';
+import { documentDirectory } from 'expo-file-system/legacy';
 import {
   getTranslationRoute,
   prependTargetTag,
@@ -22,7 +24,9 @@ import {
   TTS_MODEL_CONFIG,
   getModelConfig,
   LANGUAGE_MAP,
-} from './model-constants';
+HF_BASE_URL,
+HF_VARIANT
+ } from './model-constants';
 import {
   logPerfEvent,
   createNmtLogEntry,
@@ -183,6 +187,45 @@ export function TranslationEngineProvider({ children }: { children: React.ReactN
 
   // --- Exclusive Load Logic ---
 
+  
+  const ensureHFModelDownloaded = useCallback(async (direction: string) => {
+    const store = useEngineStore.getState();
+    const modelDir = `${documentDirectory}TranslatePsy/${direction}/intgemm`;
+    const modelPath = `${modelDir}/model.intgemm.alphas.bin`;
+    const vocabPath = `${modelDir}/vocab.spm`;
+
+    const modelInfo = await getInfoAsync(modelPath);
+    const vocabInfo = await getInfoAsync(vocabPath);
+
+    if (modelInfo.exists && vocabInfo.exists) {
+      return { modelPath: modelPath.replace(/^file:\/\/+/, '/'), vocabPath: vocabPath.replace(/^file:\/\/+/, '/') };
+    }
+
+    // Need to download
+    store.setLoading(true, 'Descargando TranslatePsy-EuroNano...');
+    store.setProgress(0);
+    const dirInfo = await getInfoAsync(modelDir);
+    if (!dirInfo.exists) {
+      await makeDirectoryAsync(modelDir, { intermediates: true });
+    }
+
+    const modelUrl = `${HF_BASE_URL}/${direction}/${HF_VARIANT}/intgemm/model.intgemm.alphas.bin`;
+    const vocabUrl = `${HF_BASE_URL}/${direction}/${HF_VARIANT}/intgemm/vocab.spm`;
+
+    const downloadModel = createDownloadResumable(modelUrl, modelPath, {}, (dp) => {
+      store.setProgress((dp.totalBytesWritten / dp.totalBytesExpectedToWrite) * 90); // 90% for model
+    });
+    await downloadModel.downloadAsync();
+
+    const downloadVocab = createDownloadResumable(vocabUrl, vocabPath, {}, (dp) => {
+      store.setProgress(90 + (dp.totalBytesWritten / dp.totalBytesExpectedToWrite) * 10); // 10% for vocab
+    });
+    await downloadVocab.downloadAsync();
+
+    store.setLoading(false);
+    return { modelPath: modelPath.replace(/^file:\/\/+/, '/'), vocabPath: vocabPath.replace(/^file:\/\/+/, '/') };
+  }, []);
+
   const loadExclusive = useCallback(async (modelSrc: any, modelType: string, modelConfig?: any): Promise<string> => {
     const store = useEngineStore.getState();
     const key = `${modelType}:${JSON.stringify(modelSrc)}`;
@@ -238,10 +281,8 @@ export function TranslationEngineProvider({ children }: { children: React.ReactN
       for (let i = 0; i < route.steps.length; i++) {
         const step = route.steps[i];
         const config = getModelConfig(step.from, step.to);
-        const actualModelSrc = qvacRef.current[config.modelSrc];
-        if (!actualModelSrc) throw new Error(`Modelo no encontrado en el SDK: ${config.modelSrc}`);
-
-        const modelId = await loadExclusive(actualModelSrc, config.modelType, { from: step.from, to: step.to });
+        const hfPaths = await ensureHFModelDownloaded(config.modelSrc);
+        const modelId = await loadExclusive(hfPaths, config.modelType, { from: step.from, to: step.to, engine: 'Bergamot' });
 
         const textToTranslate = prependTargetTag(currentText, step.to);
         
@@ -376,16 +417,10 @@ export function TranslationEngineProvider({ children }: { children: React.ReactN
         return;
       }
 
-      // Download NMT models
+      // Download NMT models (Hugging Face)
       for (const step of route.steps) {
         const config = getModelConfig(step.from, step.to);
-        const src = qvac[config.modelSrc];
-        if (src) {
-           await qvac.downloadAsset({
-              assetSrc: src,
-              onProgress: (p: any) => store.setProgress(p.percentage),
-           });
-        }
+        await ensureHFModelDownloaded(config.modelSrc);
       }
       
       // Download Whisper

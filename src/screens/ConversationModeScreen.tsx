@@ -82,9 +82,9 @@ export function ConversationModeScreen() {
     }).start();
 
     const recordingOptions = {
-      sampleRate: 16000,
-      channels: 1,
-      encoding: 'pcm_16bit',
+      sampleRate: 16000 as any,
+      channels: 1 as 1,
+      encoding: 'pcm_16bit' as any,
       keepAwake: false
     };
     try {
