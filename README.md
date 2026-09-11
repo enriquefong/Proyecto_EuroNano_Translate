@@ -1,47 +1,49 @@
 # EuroNano Translate
 
-Una aplicación móvil Android de traducción de voz y texto 100% offline, desarrollada para el hackathon de QVAC. Basada en React Native, Expo, y el motor de IA local `@qvac/sdk`.
+> Una aplicación móvil de traducción de voz y texto 100% offline. Utiliza inteligencia artificial ejecutada localmente en el teléfono para traducir texto en tiempo real, escuchar voz y reproducir audio, garantizando absoluta privacidad y funcionamiento sin internet.
 
-## Características
+[![Android Release](https://github.com/enriquefong/Proyecto_EuroNano_Translate/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/enriquefong/Proyecto_EuroNano_Translate/actions/workflows/release.yml)
+[![Licencia MIT](https://img.shields.io/badge/licencia-MIT-2ea44f.svg)](LICENSE)
 
-- **Traducción NMT (Bergamot)**: Traducción de alta calidad bidireccional entre Inglés y 9 idiomas europeos (DE, ES, FR, IT, PT, FI, CS, NL, SV) usando el modelo `TranslatePsy-EuroNano`.
-- **Transcripción ASR (Whisper)**: Reconocimiento de voz local y privado.
-- **Síntesis de Voz TTS (Supertonic)**: Reproducción de las traducciones generadas.
-- **Enrutamiento Inteligente (Pivot Routing)**: Traducción automática entre pares sin inglés (ej. ES → FR) haciendo un pivote interno transparente (ES → EN → FR).
-- **100% Local y Privado**: Tras la descarga inicial de los modelos, la app funciona completamente en modo avión.
-- **3 Modos de Uso**:
-  - 📝 **Modo Texto**: Traducción estilo chat con texto en tiempo real.
-  - 🎤 **Modo Voz**: Push-to-talk para traducción por voz.
-  - 💬 **Modo Conversación**: Pantalla dividida cara a cara para conversaciones fluidas.
+## Entrega del Proyecto
 
-## Requisitos del Sistema
+| Recurso | Enlace |
+| --- | --- |
+| Aplicación Android | **[Descargar APK (Última versión)](https://github.com/enriquefong/Proyecto_EuroNano_Translate/releases/latest)** |
+| Historial de Versiones | [Página de Releases](https://github.com/enriquefong/Proyecto_EuroNano_Translate/releases) |
+| Código Fuente | [Repositorio en GitHub](https://github.com/enriquefong/Proyecto_EuroNano_Translate) |
 
-- **Desarrollo**: Node.js >= v22.17, Expo CLI.
-- **Dispositivo**: **Se requiere un teléfono Android físico**. El SDK de QVAC utiliza módulos nativos (JNI/C++) que no son compatibles con emuladores.
-- **Android OS**: Mínimo SDK 29 (Android 10).
-- **Hardware**: Se recomiendan 6GB+ RAM y CPU octa-core moderna (Snapdragon 7/8 gen, etc.) para latencia en tiempo real.
+## La Propuesta
 
-## Instalación y Ejecución
+Las aplicaciones de traducción convencionales requieren una conexión activa a internet, lo cual es problemático al viajar al extranjero (costos de roaming, zonas sin cobertura) y plantea riesgos de privacidad al enviar tu voz y conversaciones a servidores de terceros.
 
-1. Instalar dependencias:
-   ```bash
-   npm install
-   ```
+EuroNano Translate resuelve esto procesando todo localmente:
 
-2. Configurar el entorno nativo de Android (Prebuild):
-   ```bash
-   npx expo prebuild --platform android
-   ```
+1. **Traducción NMT (Bergamot)**: Traducción de alta calidad bidireccional entre Inglés y 9 idiomas europeos (DE, ES, FR, IT, PT, FI, CS, NL, SV) usando el modelo `TranslatePsy-EuroNano`. Todo corre en la memoria del celular.
+2. **Reconocimiento y Síntesis de Voz (ASR/TTS)**: Reconocimiento de voz mediante *Whisper* y reproducción mediante *Supertonic* para tener conversaciones fluidas.
+3. **Enrutamiento Inteligente (Pivot Routing)**: Traducción automática entre idiomas que no son inglés (ej. Español ↔ Francés) haciendo un salto interno transparente (ES → EN → FR) usando el inglés como pivote.
+4. **Privacidad Absoluta**: Tras descargar los modelos de idioma necesarios bajo demanda (una sola vez), la aplicación opera 100% en modo avión. Nunca envía audio, texto ni telemetría a la nube.
 
-3. Compilar e instalar en un dispositivo físico conectado (por USB o Wi-Fi Debugging):
-   ```bash
-   npx expo run:android --device
-   ```
+## Modos de Uso
 
-## Arquitectura
+| Modo | Descripción |
+| --- | --- |
+| 💬 **Modo Texto** | Interfaz clásica de traducción. Escribe texto y obtén resultados instantáneos. |
+| 🎙️ **Modo Voz** | Funcionalidad *Push-to-talk* (presionar para hablar). Transcribe tu voz y la traduce al idioma destino. |
+| 🤝 **Modo Conversación** | Pantalla dividida diseñada para poner el teléfono entre dos personas y tener una conversación cara a cara. |
 
-El núcleo de la aplicación está en `src/engine/TranslationEngineProvider.tsx`, que gestiona el ciclo de vida de los modelos usando un contexto de React y `Zustand` para el estado global. La lógica de ruteo de idiomas se encuentra en `src/engine/pivot-router.ts`.
+## Requisitos y Configuración Técnica
 
-## Privacidad
+*   **Dispositivo**: Se requiere un teléfono Android físico (mínimo Android 10 / SDK 29). El procesamiento neuronal utiliza módulos nativos (JNI/C++) incompatibles con emuladores.
+*   **Hardware Recomendado**: 6GB+ RAM y CPU octa-core moderna para traducciones fluidas en tiempo real.
+*   **Desarrollo Local**: Si deseas compilar la app desde el código:
+    ```bash
+    npm install
+    npx expo prebuild --platform android
+    npx expo run:android --device
+    ```
 
-La privacidad es el pilar de este proyecto. No se envía telemetría, audio ni texto a ningún servidor externo. El 100% del procesamiento es *on-device*.
+## Arquitectura del Sistema
+
+El núcleo de la aplicación reside en `src/engine/TranslationEngineProvider.tsx`, encargado de orquestar el ciclo de vida de los modelos IA locales a través del SDK `@qvac/sdk`. 
+La lógica de cálculo de rutas entre idiomas se encuentra en `src/engine/pivot-router.ts`, y todo el estado global se administra eficientemente usando `Zustand`.
