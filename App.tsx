@@ -15,6 +15,7 @@ import { Outfit_700Bold } from '@expo-google-fonts/outfit';
 import { TranslationEngineProvider } from './src/engine/TranslationEngineProvider';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { DisclaimerModal } from './src/components/DisclaimerModal';
+import { GlobalDownloadOverlay } from './src/components/GlobalDownloadOverlay';
 import { colors, typography, spacing } from './src/theme/theme';
 
 export default function App() {
@@ -65,6 +66,7 @@ export default function App() {
           visible={showDisclaimer}
           onAccept={handleDisclaimerAccept}
         />
+        <GlobalDownloadOverlay />
         <AppNavigator />
       </TranslationEngineProvider>
     </SafeAreaProvider>
