@@ -48,8 +48,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          # Buscar el APK generado
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "Found APK at: $APK_PATH"
+          
           # Alinear el APK
-          $BUILD_TOOLS_DIR/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
+          $BUILD_TOOLS_DIR/zipalign -v -p 4 "$APK_PATH" app-release-aligned.apk
           # Firmar el APK
           $BUILD_TOOLS_DIR/apksigner sign --ks euronano.jks --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEYSTORE_PASSWORD --out euronano-translate.apk app-release-aligned.apk
 
