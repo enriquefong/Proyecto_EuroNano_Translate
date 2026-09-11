@@ -32,7 +32,9 @@
         {
           "android": {
             "minSdkVersion": 29,
-            "ndkVersion": "26.1.10909125"
+            "ndkVersion": "26.1.10909125",
+            "enableProguardInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false
           }
         }
       ],
