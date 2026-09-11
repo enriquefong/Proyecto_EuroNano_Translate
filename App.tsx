@@ -5,6 +5,7 @@
  * Usando @qvac/sdk con TranslatePsy-EuroNano
  */
 
+import 'react-native-get-random-values';
 import React, { useState, useCallback, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
